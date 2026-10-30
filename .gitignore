@@ -1,0 +1,34 @@
+# Vivado / SDK 生成物（可由 vivado/*.tcl、sw/*.tcl 重新生成）
+build/
+sw/workspace/
+sw/boot/
+.Xil/
+*.jou
+*.log
+*.str
+*.backup.*
+webtalk*
+
+# 仿真工作目录
+sim/work*/
+sim/xsim.dir/
+*.wdb
+*.pb
+
+# PC 测试生成物
+sw/test/build/
+sw/test/*.bin
+__pycache__/
+*.pyc
+*.exe
+
+# 本地备份
+backup_*/
+
+# 实录数据：可能录到人声，所用警笛素材的再分发授权也未确认，不公开（见 rec/README.md）
+rec/*
+!rec/README.md
+*.npz
+*.wav
+*.mp3
+*.joblib
