@@ -505,3 +505,10 @@ python -I F:\FPGA_project\sound_localization\tools\analyze_rec.py F:\FPGA_projec
   JTAG 每 3s 读 0x41220000：0x264（南北绿）→0x252（南北黄）→0x249（全红）→0x909（东西绿）→0x489（东西黄）→0x249→0x264，
   周期与设计一致。当时串口线未连接（COM11 消失），`TL,...` 串口行与 OLED/HDMI 画面未在板上看到；救护车优先未在板上实测。
 - 旧硬件备份：`backup_build_extras_20261023/system_wrapper_before_tl.hdf`、`hw_platform_before_tl/`。
+
+## 28. 2026-10-30 开源到 GitHub
+
+- 仓库：https://github.com/dsf723/acoustic-emergency-priority （Public，MIT；字库 `hdmi_font.c` 为 OFL 1.1）。
+- 不公开：`rec/` 录音（可能含人声、警笛素材授权未确认）、`build/`、`sw/workspace/`、`sw/boot/`、备份（见 `.gitignore`）。
+  没有录音时 `interference_test.py` 自动跳过依赖实录的检查；已在只含待公开文件的目录中跑通 `gen_test.py`。
+- 本仓库 git 身份为本地配置：`dsf723 <dsf723@users.noreply.github.com>`。
