@@ -14,7 +14,7 @@ if {[catch {current_project}]} {
 
 # 检查引脚是否已分配
 set unplaced {}
-foreach p {mic_sck mic_ws mic_d[0] mic_d[1] mic_d[2] mic_d[3] led_ck led_da oled_iic_scl_io oled_iic_sda_io sys_clk hdmi_hpd tmds_clk_p tmds_data_p[0] tmds_data_p[1] tmds_data_p[2] tl_out[0] tl_out[1] tl_out[2] tl_out[3] tl_out[4] tl_out[5] tl_out[6] tl_out[7] tl_out[8] tl_out[9] tl_out[10] tl_out[11] tl_out[12] tl_out[13] tl_out[14]} {
+foreach p {mic_sck mic_ws mic_d[0] mic_d[1] mic_d[2] mic_d[3] led_ck led_da oled_iic_scl_io oled_iic_sda_io sys_clk hdmi_hpd tmds_clk_p tmds_data_p[0] tmds_data_p[1] tmds_data_p[2] tl_out[0] tl_out[1] tl_out[2] tl_out[3] tl_out[4] tl_out[5] tl_out[6] tl_out[7] tl_out[8] tl_out[9] tl_out[10] tl_out[11] tl_out[12] oled2_iic_scl_io oled2_iic_sda_io oled_sw_tri_io[0] oled_sw_tri_io[1] oled_sw_tri_io[2] oled_sw_tri_io[3]} {
     set found 0
     foreach f [get_files -of_objects [get_filesets constrs_1]] {
         set fp [open $f r]

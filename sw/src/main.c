@@ -15,7 +15,8 @@
  *   CAL,OK,<参考音量 x10> / CAL,FAIL,NO_SIREN                          串口发 'C' 标定后的回应
  *   TL,<NS|EW>,<GREEN|YELLOW|ALLRED>,<NORMAL|PRIORITY_N/S/E/W>        信号灯状态变化时
  * 串口输入：'C' = 把当前警笛音量标定为 1 米处（喇叭放在 1 米处、警笛响着时发送）
- * 路口信号灯：tl_out 15 路（J4.12~26，见 constr/sound_loc.xdc），OLED 显示两个相位的倒计时（代替数码管）
+ * 路口信号灯：tl_out 13 路（J4.12~24，见 constr/sound_loc.xdc）
+ * 4 块 OLED 代替数码管，每个进口一块、各用一条 I2C（见 oled_ssd1306.h）
  *   LVL,<ch0>,...,<ch7>,<处理耗时 us>,<overrun>                         每秒一行，各通道电平 dBFS
  *   CAP,<seq_errors>,<short_packets>,<dma_errors>                       累计采集错误计数
  *   FEA,...（调试器把 debug_fea 写 1 时每块输出特征，用于标定，字段见代码）
@@ -75,14 +76,15 @@ volatile uint32_t capture_dma_errors;
 static XAxiDma dma;
 static XGpio   gpio_status;         /* 通道 1：frame_cnt，通道 2：overrun */
 static XGpio   gpio_led;
-static XGpio   gpio_tl;             /* 路口信号灯 15 路输出（tl_out，接 J4.12~26） */
+static XGpio   gpio_tl;             /* 路口信号灯 13 路输出（tl_out，接 J4.12~24） */
 static tl_state_t tl;               /* 信号灯状态机：正常循环 + 救护车优先放行 */
-static oled_fb_t oled_fb;
+static oled_fb_t oled_fb[OLED_NUM];       /* 下标为进口 TL_N/S/E/W */
 static hdmi_fb_t hdmi_shadow;       /* HDMI 整屏画面（DDR），增量同步到 PL 帧缓冲 */
 #define HDMI_RENDER_BLOCKS  6       /* 每 6 块（约 0.13s）重画一次 HDMI 画面 */
+#define OLED_BLOCK_BUDGET_US 5000u   /* 每个音频块（21ms）留给 OLED 发送的时间 */
 static char hdmi_mode_text[64];      /* HDMI 底栏右侧：信号灯状态 */
 static int fault_screen_shown;
-/* 灯模块低电平点亮时改为 0x1FFF（只翻转 13 路灯与指示灯） */
+/* 灯模块低电平点亮时改为 0x0FFF */
 #define TL_OUT_INVERT       0x0000u
 
 static uint32_t now_ms(void)
@@ -132,7 +134,7 @@ static void tl_text(char *buf, uint32_t now)
 
 static void tl_write(void)
 {
-    XGpio_DiscreteWrite(&gpio_tl, 1, tl_outputs(&tl) ^ TL_OUT_INVERT);
+    XGpio_DiscreteWrite(&gpio_tl, 1, tl_outputs(&tl, now_ms()) ^ TL_OUT_INVERT);
 }
 
 /* 画面内容（取整后的角度等）是否与上次绘制的不同；不同才重画，节省 CPU */
@@ -182,6 +184,16 @@ static int fx(float v, float scale)
     return (int)(s >= 0.0f ? s + 0.5f : s - 0.5f);
 }
 
+/* 重画 4 块屏的倒计时并整屏发送（阻塞，只用于启动和故障） */
+static void oled_show_all(void)
+{
+    int n;
+    for (n = 0; n < OLED_NUM; n++) {
+        oled_tl_render(oled_fb[n], tl_countdown_s(&tl, tl_phase_of(n), now_ms()));
+        oled_flush(n, oled_fb[n]);
+    }
+}
+
 static void invalidate_target(snd_state_t *sc, target_output_t *target,
                               oled_ui_state_t *ui, int *siren_prev)
 {
@@ -197,10 +209,8 @@ static void invalidate_target(snd_state_t *sc, target_output_t *target,
     sk9822_show_direction(-1.0f);
     /* Error branches can keep skipping the normal UI loop. Clear the panel
      * once on entering a fault so it cannot indefinitely show an old target. */
-    if (!fault_screen_shown && oled_available()) {
-        oled_tl_render(oled_fb, &tl, now_ms());
-        oled_flush(oled_fb);
-    }
+    if (!fault_screen_shown && oled_available())
+        oled_show_all();
     if (!fault_screen_shown)
         hdmi_ui_render(hdmi_shadow, ui, hdmi_mode_text);     /* 由主循环逐步同步到屏幕 */
     fault_screen_shown = 1;
@@ -213,7 +223,8 @@ int main(void)
     int blk = 0;
     u32 proc_us = 0;
     int i;
-    int oled_step = 0;
+    int oled_next = 0;
+    int oled_last[OLED_NUM] = { -2, -2, -2, -2 };   /* 已画的倒计时 */
     int hdmi_synced = 1;
     uint32_t hdmi_last_render = 0;
     int siren_prev = 0;
@@ -241,12 +252,14 @@ int main(void)
     tl_text(hdmi_mode_text, now_ms());
     xil_printf("TL,init,north_az=%d\r\n", fx(TL_NORTH_AZ_DEG, 1.0f));
 
-    if (oled_init() == 0) {
-        oled_tl_render(oled_fb, &tl, now_ms());
-        oled_flush(oled_fb);
-        xil_printf("OLED ready\r\n");
-    } else {
-        xil_printf("OLED not found on I2C0 (addr 0x3C), continuing without display\r\n");
+    oled_init();
+    oled_show_all();
+    for (i = 0; i < OLED_NUM; i++) {
+        static const char *const oled_name[OLED_NUM] = { "N", "S", "E", "W" };
+        if (oled_ok(i))
+            xil_printf("OLED %s ready\r\n", oled_name[i]);
+        else
+            xil_printf("OLED %s not found (addr 0x3C), continuing without it\r\n", oled_name[i]);
     }
 
     /* HDMI：640x480，先画初始画面并整屏写入 */
@@ -441,12 +454,28 @@ int main(void)
         }
         hdmi_synced = hdmi_out_sync(hdmi_shadow);
 
-        /* OLED 增量刷新：每块发送半页（100kHz 下约 6ms），16 块刷新一整屏（约 3 帧/秒） */
+        /*
+         * OLED 代替数码管：倒计时变化时重画；4 块屏轮流发送有变化的列，
+         * 每个音频块最多占用 OLED_BLOCK_BUDGET_US，数字换一次通常约 0.15s 刷完
+         */
         if (oled_available() && !telemetry_block && !feature_block) {
-            if (oled_step == 0)
-                oled_tl_render(oled_fb, &tl, now_ms());     /* OLED 代替数码管：信号灯倒计时 */
-            oled_flush_step(oled_fb, oled_step);
-            oled_step = (oled_step + 1) % OLED_FLUSH_STEPS;
+            uint32_t now = now_ms();
+            XTime ts, te;
+            int n, idle = 0;
+            for (n = 0; n < OLED_NUM; n++) {
+                int secs = tl_countdown_s(&tl, tl_phase_of(n), now);
+                if (secs != oled_last[n]) {
+                    oled_tl_render(oled_fb[n], secs);
+                    oled_last[n] = secs;
+                }
+            }
+            XTime_GetTime(&ts);
+            do {
+                idle = oled_sync_step(oled_next, oled_fb[oled_next]) ? 0 : idle + 1;
+                oled_next = (oled_next + 1) % OLED_NUM;
+                XTime_GetTime(&te);
+            } while (idle < OLED_NUM &&
+                     (te - ts) < (XTime)OLED_BLOCK_BUDGET_US * (COUNTS_PER_SECOND / 1000000));
         }
 
         if (ret != 0)

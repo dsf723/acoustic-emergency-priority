@@ -55,6 +55,8 @@ set_property -dict [list \
     CONFIG.PCW_FPGA0_PERIPHERAL_FREQMHZ {50} \
     CONFIG.PCW_I2C0_PERIPHERAL_ENABLE {1} \
     CONFIG.PCW_I2C0_I2C0_IO {EMIO} \
+    CONFIG.PCW_I2C1_PERIPHERAL_ENABLE {1} \
+    CONFIG.PCW_I2C1_I2C1_IO {EMIO} \
 ] $ps
 
 # ---------------- 麦克风阵列采集（RTL 模块引用） ----------------
@@ -84,11 +86,16 @@ set_property -dict [list \
 set gled [create_bd_cell -type ip -vlnv xilinx.com:ip:axi_gpio:2.0 axi_gpio_led]
 set_property -dict [list CONFIG.C_ALL_OUTPUTS {1} CONFIG.C_GPIO_WIDTH {2}] $gled
 
-# Traffic lights (emergency-vehicle acoustic priority): 15 outputs on J4 pins 12..26
-#   bits 0-2 north R/Y/G, 3-5 south, 6-8 east, 9-11 west, 12 priority indicator, 13-14 spare
+# Traffic lights (emergency-vehicle acoustic priority): 13 outputs on J4 pins 12..24
+#   bits 0-2 north R/Y/G, 3-5 south, 6-8 east, 9-11 west, 12 priority indicator
 #   (pin table in constr/sound_loc.xdc; comment kept ASCII on purpose, see HANDOFF section 27)
 set gtl [create_bd_cell -type ip -vlnv xilinx.com:ip:axi_gpio:2.0 axi_gpio_tl]
-set_property -dict [list CONFIG.C_ALL_OUTPUTS {1} CONFIG.C_GPIO_WIDTH {15} CONFIG.C_DOUT_DEFAULT {0x00000000}] $gtl
+set_property -dict [list CONFIG.C_ALL_OUTPUTS {1} CONFIG.C_GPIO_WIDTH {13} CONFIG.C_DOUT_DEFAULT {0x00000000}] $gtl
+
+# East/west OLED buses: software I2C on a tri-state GPIO (the PS has only two I2C controllers)
+#   bit 0 east SCL, 1 east SDA, 2 west SCL, 3 west SDA; ports oled_sw_tri_io[3:0]
+set goled [create_bd_cell -type ip -vlnv xilinx.com:ip:axi_gpio:2.0 axi_gpio_oled]
+set_property -dict [list CONFIG.C_GPIO_WIDTH {4} CONFIG.C_ALL_OUTPUTS {0} CONFIG.C_ALL_INPUTS {0}] $goled
 
 # ---------------- HDMI 帧缓冲显示（RTL 模块引用，640x480，PS 经 AXI4-Lite 写像素） ----------------
 set hdmi [create_bd_cell -type module -reference hdmi_fb hdmi]
@@ -109,6 +116,9 @@ apply_bd_automation -rule xilinx.com:bd_rule:axi4 \
 apply_bd_automation -rule xilinx.com:bd_rule:axi4 \
     -config {Clk_master {Auto} Clk_slave {Auto} Clk_xbar {Auto} Master {/ps7/M_AXI_GP0} Slave {/axi_gpio_tl/S_AXI} intc_ip {New AXI Interconnect} master_apm {0}} \
     [get_bd_intf_pins axi_gpio_tl/S_AXI]
+apply_bd_automation -rule xilinx.com:bd_rule:axi4 \
+    -config {Clk_master {Auto} Clk_slave {Auto} Clk_xbar {Auto} Master {/ps7/M_AXI_GP0} Slave {/axi_gpio_oled/S_AXI} intc_ip {New AXI Interconnect} master_apm {0}} \
+    [get_bd_intf_pins axi_gpio_oled/S_AXI]
 apply_bd_automation -rule xilinx.com:bd_rule:axi4 \
     -config {Clk_master {Auto} Clk_slave {Auto} Clk_xbar {Auto} Master {/axi_dma_0/M_AXI_S2MM} Slave {/ps7/S_AXI_HP0} intc_ip {Auto} master_apm {0}} \
     [get_bd_intf_pins ps7/S_AXI_HP0]
@@ -134,6 +144,11 @@ connect_bd_net [get_bd_ports mic_d]   [get_bd_pins mic_rx/mic_d]
 # OLED：PS I2C0 经 EMIO 引出，wrapper 中生成 oled_iic_scl_io / oled_iic_sda_io 双向端口
 create_bd_intf_port -mode Master -vlnv xilinx.com:interface:iic_rtl:1.0 oled_iic
 connect_bd_intf_net [get_bd_intf_pins ps7/IIC_0] [get_bd_intf_ports oled_iic]
+# Second OLED bus (south display): PS I2C1 via EMIO, oled2_iic_scl_io / oled2_iic_sda_io
+create_bd_intf_port -mode Master -vlnv xilinx.com:interface:iic_rtl:1.0 oled2_iic
+connect_bd_intf_net [get_bd_intf_pins ps7/IIC_1] [get_bd_intf_ports oled2_iic]
+create_bd_intf_port -mode Master -vlnv xilinx.com:interface:gpio_rtl:1.0 oled_sw
+connect_bd_intf_net [get_bd_intf_pins axi_gpio_oled/GPIO] [get_bd_intf_ports oled_sw]
 
 # HDMI：板载 50MHz 晶振（视频时钟源）、热插拔检测、TMDS 差分输出
 create_bd_port -dir I -type clk sys_clk
@@ -150,7 +165,7 @@ connect_bd_net [get_bd_ports tmds_clk_n]  [get_bd_pins hdmi/tmds_ck_n]
 connect_bd_net [get_bd_ports tmds_data_p] [get_bd_pins hdmi/tmds_data_p]
 connect_bd_net [get_bd_ports tmds_data_n] [get_bd_pins hdmi/tmds_data_n]
 
-create_bd_port -dir O -from 14 -to 0 tl_out
+create_bd_port -dir O -from 12 -to 0 tl_out
 connect_bd_net [get_bd_ports tl_out] [get_bd_pins axi_gpio_tl/gpio_io_o]
 
 foreach {name bit} {led_ck 0 led_da 1} {

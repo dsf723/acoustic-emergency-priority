@@ -82,12 +82,16 @@ int tl_step(tl_state_t *tl, uint32_t now_ms, int req_approach)
     case TL_ST_GREEN:
         if (want == tl->phase) {
             tl->dur = 0;                                /* 绿灯延长：保持 */
-        } else if (want >= 0) {
-            if (el >= TL_MIN_GREEN_MS)                  /* 红灯早断：当前绿灯提前结束 */
-                enter(tl, TL_ST_YELLOW, now_ms, TL_YELLOW_MS);
         } else {
-            if (tl->dur == 0)                           /* 优先刚结束：再放一会儿 */
+            if (want >= 0) {                            /* 红灯早断：当前绿灯提前结束，结束前也要闪够 */
+                uint32_t end = el + TL_GREEN_FLASH_MS;
+                if (end < TL_MIN_GREEN_MS)
+                    end = TL_MIN_GREEN_MS;
+                if (tl->dur == 0 || tl->dur > end)
+                    tl->dur = end;
+            } else if (tl->dur == 0) {                  /* 优先刚结束：再放一会儿 */
                 tl->dur = el + TL_RELEASE_GREEN_MS;
+            }
             if (el >= tl->dur)
                 enter(tl, TL_ST_YELLOW, now_ms, TL_YELLOW_MS);
         }
@@ -114,14 +118,26 @@ int tl_light(const tl_state_t *tl, int approach)
     return tl->state == TL_ST_GREEN ? TL_GREEN : TL_YELLOW;
 }
 
-uint32_t tl_outputs(const tl_state_t *tl)
+/* 绿灯闪烁的灭相：定时绿灯的最后 TL_GREEN_FLASH_MS，亮灭各 0.5s，优先保持（不定时）时不闪 */
+static int green_flash_off(const tl_state_t *tl, uint32_t now_ms)
+{
+    uint32_t el = now_ms - tl->t_state, left;
+    if (tl->state != TL_ST_GREEN || tl->dur == 0 || el >= tl->dur)
+        return 0;
+    left = tl->dur - el;
+    return left <= TL_GREEN_FLASH_MS && left % 1000u < 500u;
+}
+
+uint32_t tl_outputs(const tl_state_t *tl, uint32_t now_ms)
 {
     uint32_t out = 0;
+    int off = green_flash_off(tl, now_ms);
     int a;
-    for (a = 0; a < TL_NUM_APPROACH; a++)
-        out |= 1u << (3 * a + tl_light(tl, a));     /* 红 +0、黄 +1、绿 +2 */
-    if (tl->preempt)
-        out |= 1u << TL_BIT_PRIORITY;
+    for (a = 0; a < TL_NUM_APPROACH; a++) {
+        int l = tl_light(tl, a);
+        if (l != TL_GREEN || !off)
+            out |= 1u << (3 * a + l);               /* 红 +0、黄 +1、绿 +2 */
+    }
     return out;
 }
 
@@ -138,8 +154,6 @@ int tl_countdown_s(const tl_state_t *tl, int ph, uint32_t now_ms)
     left = tl->dur > el ? tl->dur - el : 0;
     if (tl->state == TL_ST_GREEN && tl->dur == 0)
         return -1;                                  /* 优先保持中，不定时 */
-    if (ph == tl->phase && tl->state == TL_ST_GREEN && want >= 0 && want != ph)
-        return ceil_s(el < TL_MIN_GREEN_MS ? TL_MIN_GREEN_MS - el : 0);   /* 等红灯早断 */
     if (ph == tl->phase && tl->state != TL_ST_ALLRED)
         return ceil_s(left);                        /* 本相位绿/黄的剩余 */
     /* 本相位是红灯：到它变绿还要多久 */
@@ -148,10 +162,6 @@ int tl_countdown_s(const tl_state_t *tl, int ph, uint32_t now_ms)
     if (tl->state == TL_ST_ALLRED)
         return ph != tl->phase || want == ph ? ceil_s(left) :
                ceil_s(left + TL_GREEN_MS + TL_YELLOW_MS + TL_ALLRED_MS);
-    if (tl->state == TL_ST_GREEN && want == ph) {   /* 正在等红灯早断 */
-        uint32_t wait = el < TL_MIN_GREEN_MS ? TL_MIN_GREEN_MS - el : 0;
-        return ceil_s(wait + TL_YELLOW_MS + TL_ALLRED_MS);
-    }
     if (tl->state == TL_ST_GREEN)
         return ceil_s(left + TL_YELLOW_MS + TL_ALLRED_MS);
     return ceil_s(left + TL_ALLRED_MS);             /* 另一相位黄灯中 */

@@ -316,6 +316,11 @@ def main():
                     os.path.join(SRC, "traffic_light.c"), os.path.join(HERE, "test_traffic.c"),
                     "-o", traffic_exe, "-lm"], check=True, env=env)
     subprocess.run([traffic_exe], check=True, env=env)
+    i2c_exe = os.path.join(BUILD, "test_soft_i2c.exe")
+    subprocess.run([GCC, "-O2", "-std=gnu99", "-Wall", "-I", SRC,
+                    os.path.join(SRC, "soft_i2c.c"), os.path.join(HERE, "test_soft_i2c.c"),
+                    "-o", i2c_exe], check=True, env=env)
+    subprocess.run([i2c_exe], check=True, env=env)
     ok = True
 
     # 场景：先 10 包背景噪声建立噪底，再每个方位角 1 包有声源

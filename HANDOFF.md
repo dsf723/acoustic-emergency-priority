@@ -512,3 +512,33 @@ python -I F:\FPGA_project\sound_localization\tools\analyze_rec.py F:\FPGA_projec
 - 不公开：`rec/` 录音（可能含人声、警笛素材授权未确认）、`build/`、`sw/workspace/`、`sw/boot/`、备份（见 `.gitignore`）。
   没有录音时 `interference_test.py` 自动跳过依赖实录的检查；已在只含待公开文件的目录中跑通 `gen_test.py`。
 - 本仓库 git 身份为本地配置：`dsf723 <dsf723@users.noreply.github.com>`。
+
+## 29. 2026-10-31 4 块 OLED 当数码管
+
+- SSD1306 模块地址相同（0x3C）。南北同相位、东西同相位，倒计时本来相同，所以两块一组并联：
+  总线 0 = PS I2C0（J4.8/10，V8/U8）接北、南；总线 1 = PS I2C1 EMIO（J4.25/26，Y11/W11，新端口 `oled2_iic_*`）接东、西。
+  因占用备用脚，`tl_out` 从 15 位改为 13 位。代价：同组两块画面相同，软件无法分别确认每块是否接好。
+- `oled_ssd1306.c`：两条总线独立计错和停用；`oled_sync_step()` 只发送有变化的半页（每块最多发一个，约 6ms，CPU 占用不变）。
+  `oled_tl.c`：每块屏显示相位名 + 灯色 + 80px 倒计时，优先时显示"优先/等待"。`main.c` 只在灯色或秒数变化时重画。
+- 更正第 27 节：`create_bd_design` 的 `couldn't read file` 不是 `-log` 造成的（`-nolog` 重定向到文件也失败过）。
+  目前观察：stdout 接管道（`| tee`）时成功，重定向到文件或 /dev/null 时失败，样本少，原因未查明。
+
+## 30. 2026-11-01 4 块 OLED 改为各用一条 I2C（取代第 29 节的两两并联）
+
+- 用户只有杜邦线、没有面包板，每块屏要独立接线，灯共地、只接正极。接线总表见 README。
+- 总线：北 PS I2C0（J4.8/10），南 PS I2C1（J4.25/26），东、西用新增 `axi_gpio_oled`（4 位三态，端口 `oled_sw_tri_io`）
+  软件 I2C（`soft_i2c.c`，J4.29~32，U14/U15/V12/W13）。不用 J4.28（U13 = PUDC_B）。
+- 电源：3.3V 只有 J3.38、J4.38、P2.1 三个脚，西口 VCC 须与北口拧线共用 J4.38；P2、ATK 口是否可插杜邦线以实物为准。
+- 全部改 400kHz；`oled_sync_step` 只发半页内变化的列；`main.c` 每音频块最多 5ms（`OLED_BLOCK_BUDGET_US`）。
+  每块屏显示自己的进口名。400kHz 与软件 I2C 未上板验证，如通信不稳先把 `OLED_I2C_HZ` 降到 100000。
+- `sw/test/test_soft_i2c.c` 用引脚级从机模型验证波形，已并入 gen_test。
+
+## 31. 2026-11-01 竖屏数码管、绿灯闪烁，去掉优先指示灯
+
+- OLED 竖用（`oled_tl.c` 逻辑坐标 64x128，转 90° 到面板，`OLED_TL_ROTATE_180` 可翻转），只画七段数字：1~10 显示，>10 空白，优先保持 `--`。
+  文字和字库不再用于 OLED。
+- 绿灯 10s（`TL_GREEN_MS`，原 20s，用户只说显示 10-1，此处是推断）、最后 3s 闪（`TL_GREEN_FLASH_MS`，亮灭各 0.5s，只闪灯、数字不闪）→ 黄 3s → 全红 2s。
+  红灯早断也先闪够 3s：`tl_step` 把绿灯结束时间设为 max(现在+3s, 最短绿灯 5s)。优先保持的绿灯不闪。
+- 没有优先指示灯：`tl_outputs` 不再输出 bit 12（硬件 13 位没改，Y12 恒低，无需重建比特流）。`tl_outputs` 增加时间参数。
+
+- 2026-11-01 上板后用户反馈数字上下颠倒，`OLED_TL_ROTATE_180` 默认改为 1。

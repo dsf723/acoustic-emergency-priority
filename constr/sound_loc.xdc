@@ -92,9 +92,9 @@ set_false_path -from [get_ports hdmi_hpd]
 #    9          19     B13_L16_P    W10    西口 红
 #   10          21     B13_L21_P    V11    西口 黄
 #   11          23     B13_L20_N    Y13    西口 绿
-#   12          24     B13_L20_P    Y12    优先放行指示灯
-#   13/14       25/26  B13_L18_N/P  Y11/W11 备用
-# 灯模块的 GND 接 J4.37/39（与阵列、OLED 共地，可用面包板分出）。
+#   12          24     B13_L20_P    Y12    未使用（恒为低）
+# （J4.25/26 改作第二条 OLED I2C，见本文件末尾）
+# 灯共地，每颗灯只接正极；公共地接摄像头口 P2.2。
 # 高电平点亮；IO 最大 8mA，裸 LED 须串 330Ω~1kΩ 电阻（常见红绿灯模块已自带电阻）。
 # J4.27~36 与摄像头接口共用，未使用。
 # =============================================================================
@@ -111,9 +111,36 @@ set_property PACKAGE_PIN W10 [get_ports {tl_out[9]}]
 set_property PACKAGE_PIN V11 [get_ports {tl_out[10]}]
 set_property PACKAGE_PIN Y13 [get_ports {tl_out[11]}]
 set_property PACKAGE_PIN Y12 [get_ports {tl_out[12]}]
-set_property PACKAGE_PIN Y11 [get_ports {tl_out[13]}]
-set_property PACKAGE_PIN W11 [get_ports {tl_out[14]}]
 set_property IOSTANDARD LVCMOS33 [get_ports {tl_out[*]}]
 set_property DRIVE 8 [get_ports {tl_out[*]}]
 set_property SLEW SLOW [get_ports {tl_out[*]}]
 set_false_path -to [get_ports {tl_out[*]}]
+
+# =============================================================================
+# 南口 OLED：PS I2C1 经 EMIO
+#   J4.25  B13_L18_N  Y11  SCL     J4.26  B13_L18_P  W11  SDA
+# 北口 OLED 用 PS I2C0（J4.8/10，见本文件开头）。
+# =============================================================================
+set_property PACKAGE_PIN Y11 [get_ports oled2_iic_scl_io]
+set_property PACKAGE_PIN W11 [get_ports oled2_iic_sda_io]
+set_property IOSTANDARD LVCMOS33 [get_ports {oled2_iic_scl_io oled2_iic_sda_io}]
+set_property PULLUP true [get_ports {oled2_iic_scl_io oled2_iic_sda_io}]
+set_false_path -from [get_ports {oled2_iic_scl_io oled2_iic_sda_io}]
+set_false_path -to [get_ports {oled2_iic_scl_io oled2_iic_sda_io}]
+
+# =============================================================================
+# 东口、西口 OLED：AXI GPIO（三态）软件模拟 I2C，Bank34（3.3V），与摄像头接口共用，不能同时插摄像头
+#   oled_sw_tri_io[0]  J4.29  B34_L11_P  U14  东口 SCL
+#   oled_sw_tri_io[1]  J4.30  B34_L11_N  U15  东口 SDA
+#   oled_sw_tri_io[2]  J4.31  B34_L4_P   V12  西口 SCL
+#   oled_sw_tri_io[3]  J4.32  B34_L4_N   W13  西口 SDA
+# 不用 J4.28（U13）：它是 PUDC_B 配置引脚，外接上拉会改变上电配置期间所有 IO 的上拉行为。
+# =============================================================================
+set_property PACKAGE_PIN U14 [get_ports {oled_sw_tri_io[0]}]
+set_property PACKAGE_PIN U15 [get_ports {oled_sw_tri_io[1]}]
+set_property PACKAGE_PIN V12 [get_ports {oled_sw_tri_io[2]}]
+set_property PACKAGE_PIN W13 [get_ports {oled_sw_tri_io[3]}]
+set_property IOSTANDARD LVCMOS33 [get_ports {oled_sw_tri_io[*]}]
+set_property PULLUP true [get_ports {oled_sw_tri_io[*]}]
+set_false_path -from [get_ports {oled_sw_tri_io[*]}]
+set_false_path -to [get_ports {oled_sw_tri_io[*]}]

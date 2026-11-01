@@ -1,90 +1,57 @@
 #include "oled_tl.h"
-#include "hdmi_ui.h"            /* hfont_find / hfont_next_cp 与字库 */
-#include <string.h>
 
-/* UTF-8 文字画到 OLED（单色：覆盖度 >= 2 点亮），返回结束 x */
-static int oled_str(oled_fb_t fb, const hfont_t *f, int x, int baseline, const char *s)
+/* 竖屏的逻辑坐标：宽 64，高 128 */
+#define V_W         64
+#define V_H         128
+#define SEG_T       8           /* 笔画粗细 */
+#define DIGIT_H     108
+#define DIGIT_Y0    ((V_H - DIGIT_H) / 2)
+#define WIDE_W      44          /* 一位数 */
+#define NARROW_W    26          /* 两位数 */
+#define NARROW_GAP  6
+
+static void fill(oled_fb_t fb, int x0, int y0, int w, int h)
 {
-    while (*s) {
-        const hfont_glyph_t *g = hfont_find(f, hfont_next_cp(&s));
-        const uint8_t *p;
-        int stride, xx, yy;
-        if (!g) {
-            x += f->height / 2;
-            continue;
+    int x, y;
+    for (y = y0; y < y0 + h; y++)
+        for (x = x0; x < x0 + w; x++) {
+            /* 逻辑坐标转到面板（横向 128x64）：转 90° */
+            if (OLED_TL_ROTATE_180)
+                oled_fb_pixel(fb, OLED_W - 1 - y, x, 1);
+            else
+                oled_fb_pixel(fb, y, OLED_H - 1 - x, 1);
         }
-        p = f->bits + g->off;
-        stride = (g->w + 3) / 4;
-        for (yy = 0; yy < g->h; yy++)
-            for (xx = 0; xx < g->w; xx++)
-                if (((p[yy * stride + (xx >> 2)] >> ((xx & 3) * 2)) & 3) >= 2)
-                    oled_fb_pixel(fb, x + g->xo + xx, baseline + g->yo + yy, 1);
-        x += g->adv;
-    }
-    return x;
 }
 
-static int oled_str_width(const hfont_t *f, const char *s)
+/* 七段：a 上、b 右上、c 右下、d 下、e 左下、f 左上、g 中 */
+static void seven_seg(oled_fb_t fb, int x0, int w, unsigned segs)
 {
-    int w = 0;
-    while (*s) {
-        const hfont_glyph_t *g = hfont_find(f, hfont_next_cp(&s));
-        w += g ? g->adv : f->height / 2;
-    }
-    return w;
+    int y0 = DIGIT_Y0, h = DIGIT_H, half = h / 2, r = x0 + w - SEG_T;
+
+    if (segs & 0x01) fill(fb, x0, y0, w, SEG_T);
+    if (segs & 0x02) fill(fb, r, y0, SEG_T, half + SEG_T / 2);
+    if (segs & 0x04) fill(fb, r, y0 + half - SEG_T / 2, SEG_T, h - half + SEG_T / 2);
+    if (segs & 0x08) fill(fb, x0, y0 + h - SEG_T, w, SEG_T);
+    if (segs & 0x10) fill(fb, x0, y0 + half - SEG_T / 2, SEG_T, h - half + SEG_T / 2);
+    if (segs & 0x20) fill(fb, x0, y0, SEG_T, half + SEG_T / 2);
+    if (segs & 0x40) fill(fb, x0, y0 + half - SEG_T / 2, w, SEG_T);
 }
 
-static const char *light_name(int l)
+void oled_tl_render(oled_fb_t fb, int secs)
 {
-    return l == TL_GREEN ? "绿" : l == TL_YELLOW ? "黄" : "红";
-}
-
-/* 一个相位的半屏：x0 起 64 像素宽 */
-static void half(oled_fb_t fb, int x0, const char *name, int light, int secs)
-{
-    char buf[8];
-    int x, w;
-
-    x = oled_str(fb, &hfont_s, x0 + 4, 15, name);
-    oled_str(fb, &hfont_s, x + 4, 15, light_name(light));
-    if (light == TL_GREEN) {                    /* 绿灯：灯色字下加横线，远处也一眼看出谁在放行 */
-        int i;
-        for (i = 0; i < 16; i++)
-            oled_fb_pixel(fb, x + 4 + i, 17, 1);
-    }
-    if (secs < 0) {
-        strcpy(buf, "--");
-    } else {
-        if (secs > 99)
-            secs = 99;
-        buf[0] = (char)('0' + secs / 10);
-        buf[1] = (char)('0' + secs % 10);
-        buf[2] = '\0';
-        if (secs < 10) {
-            buf[0] = buf[1];
-            buf[1] = '\0';
-        }
-    }
-    w = oled_str_width(&hfont_l, buf);
-    oled_str(fb, &hfont_l, x0 + (64 - w) / 2, 45, buf);
-}
-
-void oled_tl_render(oled_fb_t fb, const tl_state_t *tl, uint32_t now_ms)
-{
-    int y;
+    static const unsigned char digit[10] = {
+        0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F
+    };
+    int two_x = (V_W - 2 * NARROW_W - NARROW_GAP) / 2;
 
     oled_fb_clear(fb);
-    half(fb, 0, "南北", tl_light(tl, TL_N), tl_countdown_s(tl, TL_PH_NS, now_ms));
-    half(fb, 64, "东西", tl_light(tl, TL_E), tl_countdown_s(tl, TL_PH_EW, now_ms));
-    for (y = 0; y < 47; y += 2)
-        oled_fb_pixel(fb, 63, y, 1);
-    if (tl->preempt) {
-        char buf[48];
-        strcpy(buf, "救护车优先 ");
-        strcat(buf, tl_approach_name(tl->approach));
-        strcat(buf, "口");
-        oled_str(fb, &hfont_s, (OLED_W - oled_str_width(&hfont_s, buf)) / 2, 63, buf);
-    } else {
-        oled_str(fb, &hfont_s, (OLED_W - oled_str_width(&hfont_s, "正常通行")) / 2, 63, "正常通行");
+    if (secs < 0) {                             /* 优先放行中，不定时 */
+        seven_seg(fb, two_x, NARROW_W, 0x40);
+        seven_seg(fb, two_x + NARROW_W + NARROW_GAP, NARROW_W, 0x40);
+    } else if (secs == 10) {
+        seven_seg(fb, two_x, NARROW_W, digit[1]);
+        seven_seg(fb, two_x + NARROW_W + NARROW_GAP, NARROW_W, digit[0]);
+    } else if (secs >= 1 && secs <= 9) {
+        seven_seg(fb, (V_W - WIDE_W) / 2, WIDE_W, digit[secs]);
     }
 }
