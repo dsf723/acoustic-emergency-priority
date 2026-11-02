@@ -118,10 +118,12 @@ int tl_light(const tl_state_t *tl, int approach)
     return tl->state == TL_ST_GREEN ? TL_GREEN : TL_YELLOW;
 }
 
-/* 绿灯闪烁的灭相：定时绿灯的最后 TL_GREEN_FLASH_MS，亮灭各 0.5s，优先保持（不定时）时不闪 */
-static int green_flash_off(const tl_state_t *tl, uint32_t now_ms)
+/* 闪烁的灭相，亮灭各 0.5s：黄灯全程；定时绿灯的最后 TL_GREEN_FLASH_MS；优先保持（不定时）的绿灯不闪 */
+static int flash_off(const tl_state_t *tl, uint32_t now_ms)
 {
     uint32_t el = now_ms - tl->t_state, left;
+    if (tl->state == TL_ST_YELLOW)
+        return el % 1000u >= 500u;
     if (tl->state != TL_ST_GREEN || tl->dur == 0 || el >= tl->dur)
         return 0;
     left = tl->dur - el;
@@ -131,11 +133,11 @@ static int green_flash_off(const tl_state_t *tl, uint32_t now_ms)
 uint32_t tl_outputs(const tl_state_t *tl, uint32_t now_ms)
 {
     uint32_t out = 0;
-    int off = green_flash_off(tl, now_ms);
+    int off = flash_off(tl, now_ms);
     int a;
     for (a = 0; a < TL_NUM_APPROACH; a++) {
         int l = tl_light(tl, a);
-        if (l != TL_GREEN || !off)
+        if (l == TL_RED || !off)
             out |= 1u << (3 * a + l);               /* 红 +0、黄 +1、绿 +2 */
     }
     return out;

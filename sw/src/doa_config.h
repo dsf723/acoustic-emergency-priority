@@ -210,16 +210,18 @@
  * 所有类别共用；短促拍手证据不足时通常 UNKNOWN。 */
 /*
  * 目标模式（警笛）按音量估距离：RANGE_REF_LEVEL_DB 为 RANGE_REF_DIST_M 处的警笛谐波功率（dB，相对值），
- * 上电默认值取自 2026-10-19 实录（标注约 1 米，喇叭音量未记录），现场应在 1 米处放警笛、串口发 'C' 标定。
+ * 上电默认值来自 2026-11-01 现场实测：喇叭在 40cm 时音量中位数 2.4dB，按距离反比折算到 1 米（1 米处未实测）；
+ * 换喇叭或音量后要在 1 米处放警笛、串口发 'C' 标定。
  * 档位：< RANGE_NEAR_M 近，> RANGE_FAR_M 远；用最近 RANGE_LEVEL_WIN 个有效块（至少 RANGE_LEVEL_MIN_N）的中位数。
  */
 #ifndef RANGE_REF_LEVEL_DB
-#define RANGE_REF_LEVEL_DB       (-3.1f)
+#define RANGE_REF_LEVEL_DB       (-5.6f)
 #endif
 #define RANGE_REF_DIST_M         1.0f
-#define RANGE_NEAR_M             1.5f
-#define RANGE_FAR_M              4.0f
-#define RANGE_LEVEL_WIN          48
+/* 2026-11-01 用户要求约 1 米显示"远"、40cm 稳定显示"中"。滞回 15%：约 0.75m 变远、低于 0.57m 才退回中；低于 0.22m 变近；房间混响使远处估计偏小，所以 FAR 取得比 1 米小 */
+#define RANGE_NEAR_M             0.25f
+#define RANGE_FAR_M              0.65f
+#define RANGE_LEVEL_WIN          144     /* 约 3 秒：实测同一位置 1 秒窗口的中位数随扫频摆动约 5dB，档位来回跳 */
 #define RANGE_LEVEL_MIN_N        12
 #define RANGE_COH_NEAR           0.55f
 #define RANGE_COH_FAR            0.30f

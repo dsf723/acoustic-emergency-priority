@@ -19,9 +19,9 @@ typedef struct {
     int ascent, height;
 } hfont_t;
 
-extern const hfont_t hfont_s;      /* 16px，174 字 */
-extern const hfont_t hfont_m;      /* 22px，174 字 */
-extern const hfont_t hfont_l;      /* 34px，91 字 */
-extern const hfont_t hfont_xl;      /* 80px，12 字 */
+extern const hfont_t hfont_s;      /* 16px，158 字 */
+extern const hfont_t hfont_m;      /* 22px，158 字 */
+extern const hfont_t hfont_l;      /* 34px，75 字 */
+extern const hfont_t hfont_xl;      /* 80px，5 字 */
 
 #endif

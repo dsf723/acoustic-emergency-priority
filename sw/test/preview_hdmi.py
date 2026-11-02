@@ -23,7 +23,7 @@ def main():
     env = dict(os.environ)
     env["PATH"] = os.path.dirname(GCC) + os.pathsep + env["PATH"]
     exe = os.path.abspath(os.path.join(BUILD, "test_hdmi_ui.exe"))
-    subprocess.run([GCC, "-O2", "-std=gnu99", "-Wall", "-I", SRC, os.path.join(SRC, "hdmi_ui.c"), os.path.join(SRC, "hdmi_font.c"),
+    subprocess.run([GCC, "-O2", "-std=gnu99", "-Wall", "-I", SRC, os.path.join(SRC, "hdmi_ui.c"), os.path.join(SRC, "hdmi_font.c"), os.path.join(SRC, "traffic_light.c"),
                     os.path.join(HERE, "test_hdmi_ui.c"), "-o", exe, "-lm"], check=True, env=env)
     raw = os.path.abspath(os.path.join(BUILD, "hdmi_fb.bin"))
     subprocess.run([exe, raw], check=True, env=env)

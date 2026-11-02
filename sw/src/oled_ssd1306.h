@@ -9,8 +9,8 @@
  * 整屏刷新约 25ms，超过一个音频块（21ms）的处理时间预算，因此增量刷新：
  * 每次调用 oled_sync_step() 只发送一个半页中有变化的列（最多 64 字节，约 1.5ms）。
  *
- * 所有 I2C 等待都有超时；出错时跳过本次发送，
- * 某块屏连续出错 OLED_MAX_ERRORS 次后停用，保证定位主循环不会被显示卡住。
+ * 杜邦线可能接触不良：所有 I2C 等待都有超时，任何一次出错都把该屏标记为掉线，由 oled_maintain() 恢复。
+ * 主循环定期对每块屏调用 oled_maintain()，屏幕短暂掉电后也能恢复（掉电不一定引起 I2C 错误，但设置和画面都丢了）。
  */
 #ifndef OLED_SSD1306_H
 #define OLED_SSD1306_H
@@ -19,15 +19,20 @@
 
 #define OLED_NUM    4
 
-/* 初始化 4 条总线和屏幕，返回应答的屏幕数 */
+/* 初始化 I2C 和 4 块屏，返回应答的屏幕数 */
 int  oled_init(void);
 /* 发送整屏（阻塞约 25ms，用于启动画面） */
 int  oled_flush(int n, const oled_fb_t fb);
-/* 发送一个有变化的半页；发送了返回 1，没有变化或该屏不可用返回 0 */
+/* 发送一个有变化的半页；发送了返回 1，没有变化或该屏掉线返回 0 */
 int  oled_sync_step(int n, const oled_fb_t fb);
-/* 该屏是否可用（初始化成功且未因连续出错被停用） */
+/*
+ * 重发初始化命令（不关显示，不闪屏）。成功则该屏恢复在线，并安排由 oled_sync_step() 逐步整屏重发 fb。
+ * 返回该屏是否在线。
+ */
+int  oled_maintain(int n, const oled_fb_t fb);
+/* 该屏是否在线 */
 int  oled_ok(int n);
-/* 至少有一块屏可用 */
+/* 至少有一块屏在线 */
 int  oled_available(void);
 
 #endif

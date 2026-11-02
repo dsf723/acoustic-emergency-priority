@@ -32,11 +32,13 @@ static void check_invariants(void)
             last_light[a] = l;
             light_since[a] = now;
         }
-        /* 只亮当前灯色那一颗；绿灯闪烁的灭相可以全灭 */
+        /* 只亮当前灯色那一颗；绿灯、黄灯闪烁的灭相可以全灭 */
         if (l == TL_GREEN)
             assert(bits == 4u || bits == 0u);
+        else if (l == TL_YELLOW)
+            assert(bits == 2u || bits == 0u);
         else
-            assert(bits == (l == TL_YELLOW ? 2u : 1u));
+            assert(bits == 1u);
     }
     assert(!(ns && ew));                                                   /* 不会两个方向同时放行 */
     assert((tl_outputs(&tl, now) >> 12) == 0u);                            /* 没有优先指示灯 */
@@ -63,21 +65,26 @@ static void run(uint32_t ms, int req)
     }
 }
 
-/* 运行 ms，统计北口绿灯输出的翻转次数 */
-static int count_green_toggles(uint32_t ms, int req)
+/* 运行 ms，统计北口某颗灯（mask）输出的翻转次数 */
+static int count_toggles(uint32_t mask, uint32_t ms, int req)
 {
-    uint32_t end = now + ms, last = tl_outputs(&tl, now) & 4u;
+    uint32_t end = now + ms, last = tl_outputs(&tl, now) & mask;
     int n = 0;
     while (now < end) {
         now += DT;
         tl_step(&tl, now, req);
         check_invariants();
-        if ((tl_outputs(&tl, now) & 4u) != last) {
-            last = tl_outputs(&tl, now) & 4u;
+        if ((tl_outputs(&tl, now) & mask) != last) {
+            last = tl_outputs(&tl, now) & mask;
             n++;
         }
     }
     return n;
+}
+
+static int count_green_toggles(uint32_t ms, int req)
+{
+    return count_toggles(4u, ms, req);
 }
 
 int main(void)
@@ -89,19 +96,32 @@ int main(void)
     assert(tl_approach_from_az(10) == TL_N && tl_approach_from_az(350) == TL_N);
     assert(tl_approach_from_az(90) == TL_W && tl_approach_from_az(180) == TL_S && tl_approach_from_az(270) == TL_E);
 
-    /* 1. 正常循环：南北绿 10s（最后 3s 闪）→ 黄 3s → 全红 2s → 东西绿 */
+    /* 1. 正常循环：南北绿 25s（最后 3s 闪）→ 黄 3s → 全红 1s → 东西绿 */
     reset();
     assert(tl.phase == TL_PH_NS && tl.state == TL_ST_GREEN && !tl.preempt);
-    assert(tl_countdown_s(&tl, TL_PH_NS, now) == 10 && tl_countdown_s(&tl, TL_PH_EW, now) == 15);
-    assert(count_green_toggles(TL_GREEN_MS - TL_GREEN_FLASH_MS - 100, -1) == 0);      /* 前 7 秒常亮 */
+    assert(tl_countdown_s(&tl, TL_PH_NS, now) == 25 && tl_countdown_s(&tl, TL_PH_EW, now) == 29);
+    assert(count_green_toggles(TL_GREEN_MS - TL_GREEN_FLASH_MS - 100, -1) == 0);      /* 前 22 秒常亮 */
     assert(tl_outputs(&tl, now) & 4u);
     assert(count_green_toggles(TL_GREEN_FLASH_MS, -1) >= 5);                          /* 最后 3 秒闪烁 */
     assert(tl.phase == TL_PH_NS && tl.state == TL_ST_GREEN);
     run(200, -1);
     assert(tl.state == TL_ST_YELLOW && tl_countdown_s(&tl, TL_PH_NS, now) == 3);
-    run(TL_YELLOW_MS + TL_ALLRED_MS, -1);
+    assert(tl_outputs(&tl, now) & 2u);                                                /* 黄灯从亮开始 */
+    assert(count_toggles(2u, TL_YELLOW_MS - 300, -1) >= 4);                           /* 全程闪烁 */
+    assert(tl.state == TL_ST_YELLOW);
+    run(300 + TL_ALLRED_MS, -1);
     assert(tl.phase == TL_PH_EW && tl.state == TL_ST_GREEN);
-    run(60000, -1);                                     /* 多跑几个周期，靠不变量检查 */
+    run(180000, -1);                                    /* 多跑几个周期，靠不变量检查 */
+
+    /* 红灯 30 秒：南北从黄变红到再次变绿 */
+    reset();
+    while (tl_light(&tl, TL_N) != TL_RED)
+        run(DT, -1);
+    t0 = now;
+    assert(tl_countdown_s(&tl, TL_PH_NS, now) == 30);
+    while (tl_light(&tl, TL_N) != TL_GREEN)
+        run(DT, -1);
+    assert(now - t0 + DT >= 30000 && now - t0 <= 30000 + DT);
 
     /* 2. 红灯早断：南北绿灯第 6 秒，西口来救护车 → 先闪 3 秒 → 黄 → 全红 → 东西绿灯保持 */
     reset();
@@ -134,14 +154,14 @@ int main(void)
     run(2000, -1);
     run(2900, TL_E);
     assert(tl.state == TL_ST_GREEN && tl.phase == TL_PH_NS);
-    assert(tl_countdown_s(&tl, TL_PH_EW, now) == 6);    /* 0.1s + 黄 3s + 全红 2s，向上取整 */
+    assert(tl_countdown_s(&tl, TL_PH_EW, now) == 5);    /* 0.1s + 黄 3s + 全红 1s，向上取整 */
     run(200, TL_E);
     assert(tl.state == TL_ST_YELLOW);
 
-    /* 4. 绿灯延长：南北绿灯第 5 秒北口来救护车，超过 10 秒仍绿 */
+    /* 4. 绿灯延长：南北绿灯第 5 秒北口来救护车，超过 25 秒仍绿 */
     reset();
     run(5000, -1);
-    run(20000, TL_N);
+    run(30000, TL_N);
     assert(tl.phase == TL_PH_NS && tl.state == TL_ST_GREEN && tl.approach == TL_N);
     run(DT, TL_S);                                      /* 同一相位改向直接更新 */
     assert(tl.approach == TL_S && tl.state == TL_ST_GREEN);
@@ -175,6 +195,6 @@ int main(void)
         run(200u + (uint32_t)(rand() % 3000), req);
     }
 
-    puts("TRAFFIC LIGHT PASSED: cycle, green flash, early red cut, green extension, min green, release, debounce, safety invariants");
+    puts("TRAFFIC LIGHT PASSED: cycle, green and yellow flash, early red cut, green extension, min green, release, debounce, safety invariants");
     return 0;
 }

@@ -101,7 +101,7 @@ def main():
     fonts = [render_font("hfont_s", 16, "Medium", ASCII + cjk),
              render_font("hfont_m", 22, "Bold", ASCII + cjk),
              render_font("hfont_l", 34, "Bold", DIGITS + "/" + cjk),
-             render_font("hfont_xl", 80, "Bold", DIGITS)]
+             render_font("hfont_xl", 80, "Bold", "-东南西北")]
     emit(fonts)
     total = sum(len(f["bits"]) for f in fonts)
     print(f"汉字 {len(cjk)} 个：{cjk}")

@@ -1,4 +1,5 @@
 #include "hdmi_ui.h"
+#include "traffic_light.h"
 #include <math.h>
 #include <string.h>
 
@@ -311,14 +312,12 @@ static void draw_static(hdmi_fb_t fb)
     hdmi_fill(fb, HC_BG);
 
     /* 标题栏 */
-    x0 = hdmi_str(fb, &hfont_m, 24, 38, "声源定位系统", HC_WHITE);
-    hdmi_str(fb, &hfont_s, x0 + 14, 37, "救护车警笛识别 · 七麦克风阵列", HC_GRAY);
+    hdmi_str(fb, &hfont_m, 24, 38, "声源定位系统", HC_WHITE);
     hdmi_rect(fb, 24, 56, HDMI_W - 48, 1, HC_DGRAY);
 
     /* 左侧卡片 */
     card(fb, CARD1_Y, CARD1_H, "识别目标");
     card(fb, CARD2_Y, CARD2_H, "声源方位");
-    hdmi_str(fb, &hfont_s, CARD_X + 16, CARD2_Y + CARD2_H - 12, "0°为0号麦 · 逆时针为正", HC_DGRAY);
     card(fb, CARD3_Y, CARD3_H, "距离估计");
 
     /* 罗盘：底盘、同心圆、十字虚线、刻度、角度标注 */
@@ -378,19 +377,6 @@ static void draw_pointer(hdmi_fb_t fb, float az)
     hdmi_disc(fb, xt, yt, 4, HC_WHITE);
 }
 
-static void utoa_s(char *buf, unsigned v)
-{
-    char tmp[12];
-    int n = 0, i;
-    do {
-        tmp[n++] = (char)('0' + v % 10);
-        v /= 10;
-    } while (v);
-    for (i = 0; i < n; i++)
-        buf[i] = tmp[n - 1 - i];
-    buf[n] = '\0';
-}
-
 void hdmi_ui_render(hdmi_fb_t fb, const hdmi_ui_state_t *st, const char *mode_text)
 {
     int alarm = st->has_sound && st->cls_name && st->cls_name[0];
@@ -420,12 +406,10 @@ void hdmi_ui_render(hdmi_fb_t fb, const hdmi_ui_state_t *st, const char *mode_te
         hdmi_str(fb, &hfont_l, CARD_X + 16, CARD1_Y + 74, "未检测到", HC_GRAY);
     }
 
-    /* 声源方位：整数度；方向不确定时显示"未知"（识别结果仍有效） */
+    /* 声源方位：只显示南北东西（与信号灯进口的换算相同）；方向不确定时显示"未知"（识别结果仍有效） */
     if (valid) {
-        char buf[16];
-        utoa_s(buf, (unsigned)lroundf(st->azimuth_deg) % 360u);
-        strcat(buf, "°");
-        hdmi_str(fb, &hfont_xl, CARD_X + 14, CARD2_Y + 122, buf, HC_WHITE);
+        hdmi_str(fb, &hfont_xl, CARD_X + 14, CARD2_Y + 122,
+                 tl_approach_name(tl_approach_from_az(st->azimuth_deg)), HC_WHITE);
     } else if (alarm) {
         hdmi_str(fb, &hfont_l, CARD_X + 16, CARD2_Y + 86, "未知", HC_YELLOW);
         hdmi_str(fb, &hfont_s, CARD_X + 16, CARD2_Y + 114, "方向不确定，继续聆听", HC_GRAY);
@@ -443,21 +427,6 @@ void hdmi_ui_render(hdmi_fb_t fb, const hdmi_ui_state_t *st, const char *mode_te
         int lit = alarm && k < band_level(st->band);
         hdmi_rect(fb, bx, CARD3_Y + 72 - h, 10, h, lit ? band_color(st->band) : HC_DGRAY);
     }
-    /* 卡片右上角：按警笛音量估计的大约米数（需在 1 米处标定过才可信） */
-    if (alarm && st->band != OLED_BAND_NONE && st->distance_m > 0.0f) {
-        char buf[32], num[12];
-        unsigned t = (unsigned)lroundf(st->distance_m * 10.0f);
-        if (t > 999)
-            t = 999;
-        strcpy(buf, "约 ");
-        utoa_s(num, t / 10);
-        strcat(buf, num);
-        strcat(buf, ".");
-        utoa_s(num, t % 10);
-        strcat(buf, num);
-        strcat(buf, " 米");
-        hdmi_str(fb, &hfont_s, CARD_X + CARD_W - 16 - hdmi_str_width(&hfont_s, buf), CARD3_Y + 28, buf, HC_LGRAY);
-    }
 
     /* 罗盘：外圈颜色表示状态，方向有效时画波束与指针 */
     if (alarm)
@@ -469,7 +438,7 @@ void hdmi_ui_render(hdmi_fb_t fb, const hdmi_ui_state_t *st, const char *mode_te
     /* 底部状态栏 */
     hdmi_disc(fb, 24, BAR_Y + 16, 4, alarm ? HC_RED : HC_GREEN);
     hdmi_str(fb, &hfont_s, 36, BAR_Y + 22,
-             alarm ? "检测到救护车警笛，请注意避让" : "系统运行中 · 等待救护车警笛",
+             alarm ? "检测到救护车警笛，请注意避让" : "系统运行中",
              alarm ? HC_RED : HC_GRAY);
     if (mode_text) {
         w = hdmi_str_width(&hfont_s, mode_text);

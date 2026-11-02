@@ -82,6 +82,7 @@ static oled_fb_t oled_fb[OLED_NUM];       /* 下标为进口 TL_N/S/E/W */
 static hdmi_fb_t hdmi_shadow;       /* HDMI 整屏画面（DDR），增量同步到 PL 帧缓冲 */
 #define HDMI_RENDER_BLOCKS  6       /* 每 6 块（约 0.13s）重画一次 HDMI 画面 */
 #define OLED_BLOCK_BUDGET_US 5000u   /* 每个音频块（21ms）留给 OLED 发送的时间 */
+#define OLED_MAINT_BLOCKS    96      /* 约每 2s：重试掉线的屏，并轮流重新初始化一块在线的屏（约 8s 一轮） */
 static char hdmi_mode_text[64];      /* HDMI 底栏右侧：信号灯状态 */
 static int fault_screen_shown;
 /* 灯模块低电平点亮时改为 0x0FFF */
@@ -143,8 +144,7 @@ static int hdmi_ui_changed(const oled_ui_state_t *a, const oled_ui_state_t *b)
     int alarm_a = a->has_sound && a->cls_name && a->cls_name[0];
     int alarm_b = b->has_sound && b->cls_name && b->cls_name[0];
     return alarm_a != alarm_b || a->direction_valid != b->direction_valid ||
-           a->band != b->band || lroundf(a->azimuth_deg) != lroundf(b->azimuth_deg) ||
-           lroundf(a->distance_m * 10.0f) != lroundf(b->distance_m * 10.0f);
+           a->band != b->band || lroundf(a->azimuth_deg) != lroundf(b->azimuth_deg);
 }
 
 static int dma_init(void)
@@ -224,6 +224,8 @@ int main(void)
     u32 proc_us = 0;
     int i;
     int oled_next = 0;
+    int oled_keep = 0;
+    int oled_maint_cnt = 0;
     int oled_last[OLED_NUM] = { -2, -2, -2, -2 };   /* 已画的倒计时 */
     int hdmi_synced = 1;
     uint32_t hdmi_last_render = 0;
@@ -458,7 +460,7 @@ int main(void)
          * OLED 代替数码管：倒计时变化时重画；4 块屏轮流发送有变化的列，
          * 每个音频块最多占用 OLED_BLOCK_BUDGET_US，数字换一次通常约 0.15s 刷完
          */
-        if (oled_available() && !telemetry_block && !feature_block) {
+        if (!telemetry_block && !feature_block) {
             uint32_t now = now_ms();
             XTime ts, te;
             int n, idle = 0;
@@ -468,6 +470,15 @@ int main(void)
                     oled_tl_render(oled_fb[n], secs);
                     oled_last[n] = secs;
                 }
+            }
+            if (++oled_maint_cnt >= OLED_MAINT_BLOCKS) {
+                oled_maint_cnt = 0;
+                for (n = 0; n < OLED_NUM; n++)
+                    if (!oled_ok(n))
+                        oled_maintain(n, oled_fb[n]);
+                if (oled_ok(oled_keep))
+                    oled_maintain(oled_keep, oled_fb[oled_keep]);
+                oled_keep = (oled_keep + 1) % OLED_NUM;
             }
             XTime_GetTime(&ts);
             do {

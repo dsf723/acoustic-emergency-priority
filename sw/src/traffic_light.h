@@ -2,7 +2,7 @@
  * 路口信号灯控制（应急车辆"声学让行"）
  *
  * 四个进口（北/南/东/西），两个相位：南北同放、东西同放。
- * 正常循环：绿 TL_GREEN_MS（最后 TL_GREEN_FLASH_MS 闪烁）→ 黄 TL_YELLOW_MS → 全红 TL_ALLRED_MS → 另一相位绿 ……
+ * 正常循环：绿 TL_GREEN_MS（最后 TL_GREEN_FLASH_MS 闪烁）→ 黄 TL_YELLOW_MS（全程闪烁）→ 全红 TL_ALLRED_MS → 另一相位绿 ……
  * 优先放行（识别到救护车且方向有效，按方位换算成来车进口）：
  *   来车相位正是绿灯：保持绿灯（绿灯延长）；
  *   来车相位是红灯：当前绿灯提前结束（红灯早断），至少放满 TL_MIN_GREEN_MS，结束前同样闪烁，
@@ -16,11 +16,11 @@
 
 #include <stdint.h>
 
-/* 配时（毫秒），演示用，比真实路口短 */
-#define TL_GREEN_MS          10000u
+/* 配时（毫秒）：每个方向绿 25s、黄 3s、红 30s。红灯时长 = 全红 + 另一方向绿 + 黄 + 全红，由下面几项决定 */
+#define TL_GREEN_MS          25000u
 #define TL_GREEN_FLASH_MS     3000u     /* 绿灯最后这段时间闪烁（亮灭各 0.5s） */
 #define TL_YELLOW_MS          3000u
-#define TL_ALLRED_MS          2000u
+#define TL_ALLRED_MS          1000u
 #define TL_MIN_GREEN_MS       5000u     /* 红灯早断前，当前绿灯至少放行这么久（行人、已进入路口的车） */
 #define TL_RELEASE_GREEN_MS   5000u     /* 优先结束后，来车相位绿灯再放这么久 */
 #define TL_PREEMPT_HOLD_MS    3000u     /* 警笛方向消失这么久才结束优先（识别偶尔中断不致来回切换） */

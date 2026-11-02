@@ -9,21 +9,20 @@
 
 #define OLED_ADDR       0x3C        /* 7 位地址（模块背面标 0x78 的即 0x3C） */
 #define OLED_I2C_HZ     400000
-#define OLED_TIMEOUT_US 20000       /* 单次传输最长等待时间 */
-#define OLED_MAX_ERRORS 10          /* 连续出错次数上限，超过后停用该屏 */
+#define OLED_TIMEOUT_US 3000        /* 单次传输最长等待时间（64 字节约 1.5ms）；总线被占住时不能拖住主循环 */
 #define HALF_W          (OLED_W / 2)
 #define OLED_HALF_PAGES (OLED_PAGES * 2)
 #define NUM_PS_I2C      2           /* 前两块用 PS 硬件 I2C，其余用软件 I2C */
 
 typedef struct {
     int       ok;
-    int       err_count;
     int       pos;                  /* 下一个要比较的半页 */
     oled_fb_t sent;                 /* 屏幕现有内容 */
 } oled_t;
 
 static oled_t  oled[OLED_NUM];
 static XIicPs  ps_iic[NUM_PS_I2C];
+static const char *const oled_label[OLED_NUM] = { "N", "S", "E", "W" };
 
 /* ---------------- 软件 I2C：GPIO 输出寄存器恒为 0，方向位 1 = 释放（上拉为高），0 = 拉低 ---------------- */
 static XGpio   gpio_oled;
@@ -88,19 +87,6 @@ static int wait_bus_idle(int n)
 }
 
 /* ---------------- 公共 ---------------- */
-static void report_error(int n)
-{
-    oled_t *d = &oled[n];
-    /* 复位 I2C 控制器，释放可能卡住的总线状态 */
-    if (n < NUM_PS_I2C)
-        iic_setup(n);
-    if (++d->err_count >= OLED_MAX_ERRORS && d->ok) {
-        d->ok = 0;
-        xil_printf("OLED %d: %d consecutive I2C errors, disabled (check SCL/SDA wiring)\r\n",
-                   n, d->err_count);
-    }
-}
-
 static int i2c_write(int n, const u8 *buf, int len)
 {
     int ret;
@@ -112,10 +98,15 @@ static int i2c_write(int n, const u8 *buf, int len)
     else
         ret = soft_i2c_write(&sw_bus[n - NUM_PS_I2C], OLED_ADDR, buf, len);
     if (ret != 0) {
-        report_error(n);
+        /* 复位 I2C 控制器，释放可能卡住的总线状态；之后由 oled_maintain() 恢复 */
+        if (n < NUM_PS_I2C)
+            iic_setup(n);
+        if (oled[n].ok) {
+            oled[n].ok = 0;
+            xil_printf("OLED %s lost (check wiring), retrying\r\n", oled_label[n]);
+        }
         return -1;
     }
-    oled[n].err_count = 0;
     return 0;
 }
 
@@ -127,10 +118,10 @@ static int oled_cmds(int n, const u8 *cmd, int len)
     return i2c_write(n, buf, len + 1);
 }
 
-int oled_init(void)
+/* 全部设置都可以重复发送；没有"关显示"，运行中重发不会闪屏 */
+static int send_init(int n)
 {
     static const u8 init_seq[] = {
-        0xAE,               /* 关显示 */
         0xD5, 0x80,         /* 时钟分频 */
         0xA8, 0x3F,         /* 多路复用 1/64 */
         0xD3, 0x00,         /* 显示偏移 0 */
@@ -147,6 +138,11 @@ int oled_init(void)
         0xA6,               /* 正常显示（非反色） */
         0xAF,               /* 开显示 */
     };
+    return oled_cmds(n, init_seq, sizeof(init_seq));
+}
+
+int oled_init(void)
+{
     int n, count = 0;
 
     XGpio_Initialize(&gpio_oled, XPAR_AXI_GPIO_OLED_DEVICE_ID);
@@ -156,16 +152,32 @@ int oled_init(void)
 
     for (n = 0; n < OLED_NUM; n++) {
         oled[n].ok = 0;
-        oled[n].err_count = 0;
         oled[n].pos = 0;
         if (n < NUM_PS_I2C && iic_setup(n) != 0)
             continue;
-        if (oled_cmds(n, init_seq, sizeof(init_seq)) != 0)
+        if (send_init(n) != 0)
             continue;
         oled[n].ok = 1;
         count++;
     }
     return count;
+}
+
+int oled_maintain(int n, const oled_fb_t fb)
+{
+    oled_t *d = &oled[n];
+    int was_ok = d->ok, page, col;
+
+    if (send_init(n) != 0)
+        return 0;
+    if (!was_ok)
+        xil_printf("OLED %s recovered\r\n", oled_label[n]);
+    d->ok = 1;
+    /* 屏幕内容未知：让 sent 与 fb 处处不同，oled_sync_step() 就会整屏重发 */
+    for (page = 0; page < OLED_PAGES; page++)
+        for (col = 0; col < OLED_W; col++)
+            d->sent[page][col] = (u8)~fb[page][col];
+    return 1;
 }
 
 int oled_ok(int n)
@@ -182,7 +194,7 @@ int oled_available(void)
     return 0;
 }
 
-/* 发送第 step 个半页中 [c0, c1] 列（页内绝对列号），成功后记入 sent */
+/* 发送第 page 页的 [c0, c1] 列，成功后记入 sent */
 static int send_columns(int n, const oled_fb_t fb, int page, int c0, int c1)
 {
     u8 buf[1 + HALF_W];

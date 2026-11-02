@@ -276,15 +276,14 @@ def main():
             seg = [r for r in rows[int((t0 + 2.0) / bt):int(t1 / bt)] if r["active"] and r["dvalid"] and r["dist"] > 0]
             est = np.median([r["dist"] for r in seg]) if seg else -1.0
             band = np.bincount([r["band"] for r in seg], minlength=4).argmax() if seg else 0
-            want = 1 if d < 1.5 else 3 if d > 4.0 else 2
-            want = 3 if d >= 4.0 else want          # 4m 处于中/远边界，接受远或中
+            want = 1 if d < 0.25 else 3 if d > 0.65 else 2
             res.append((d, est, band))
-            ok = ok and est > 0 and abs(np.log(est / d)) <= np.log(1.3) and (band == want or (d >= 4.0 and band in (2, 3)))
+            ok = ok and est > 0 and abs(np.log(est / d)) <= np.log(1.3) and (band == want or (d == 0.6 and band == 3))
         ok = ok and cal_ok
         print(f"距离估计（{fn.__name__}，1m 处标定{'成功' if cal_ok else '失败'}）：" +
               "，".join(f"{d}m→估计 {e:.2f}m 档位{'?近中远'[b]}" for d, e, b in res))
 
-    # 实录救护车（标注约 1 米）：用默认参考音量应显示"近"
+    # 实录救护车（标注约 1 米，喇叭音量未记录）：音量未知，只要求不判为"近"
     amb = sorted(glob.glob(os.path.join(rec, "dataset", "ambulance", "*T141016*", "raw.npz")))
     bgf = sorted(glob.glob(os.path.join(rec, "dataset", "background", "*T140447*", "raw.npz")))
     if amb and bgf:
@@ -295,9 +294,10 @@ def main():
         rows = run(exe, env, b"".join(g.pack(smp[i].T, i * g.NFR) for i in range(len(smp))))[96:]
         shown = [r for r in rows if r["active"] and r["dvalid"]]
         near = np.mean([r["band"] == 1 for r in shown]) if shown else 0.0
+        far = np.mean([r["band"] == 3 for r in shown]) if shown else 1.0
         dist = np.median([r["dist"] for r in shown if r["dist"] > 0]) if shown else -1
-        print(f"实录救护车（约 1 米）：显示方向 {len(shown)} 块，其中近距离 {near * 100:.0f}%，估计距离中位数 {dist:.2f}m")
-        ok = ok and near >= 0.8
+        print(f"实录救护车（约 1 米）：显示方向 {len(shown)} 块，其中近距离 {near * 100:.0f}%、远距离 {far * 100:.0f}%，估计距离中位数 {dist:.2f}m")
+        ok = ok and near <= 0.05
 
     rows = run(exe, env, scenario_traffic())
     fa = np.mean([r["active"] for r in rows])
