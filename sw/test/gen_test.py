@@ -329,7 +329,7 @@ def main():
         azs = np.arange(0, 360, 5) + 0.7
         data = b"".join(noise_pkt(i * 4) for i in range(10))
         for i, az in enumerate(azs):
-            data += pack(render(az, snr, kind, NFR), i)
+            data += pack(render(az, snr, kind, NFR, echo=echo), i)
         rows = run(exe, env, data)
         noise_rows, src_rows = rows[:10], rows[10:]
         errs = np.array([angerr(r["az"], az) for r, az in zip(src_rows, azs)])

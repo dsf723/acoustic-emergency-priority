@@ -69,6 +69,16 @@ volatile float    rec_trig_db = 25.0f;  /* rec_mode 1：触发门限（高于背
 #endif
 static uint32_t blk_no;             /* 自启动以来处理的块序号 */
 volatile uint32_t debug_fea;        /* 调试器写 1：每块串口输出特征（FEA 行），用于标定 */
+/*
+ * 全链路计时（tools/chain_test.py 经 JTAG 读写）：调试器写 ct_arm = 1 开始一次测量，
+ * 之后各事件第一次发生时记下块号（与 rec_blkno 同一计数）和毫秒时刻：
+ *   0 声音出现（高于背景 CT_SOUND_DB）  1 警笛确认  2 方向确认  3 信号灯进入优先  4 来车进口变绿
+ * ct_info：方向确认时的方位 x10、换算的进口、声音出现时的相位与灯色（phase << 8 | state）
+ */
+#define CT_SOUND_DB 15.0f
+volatile uint32_t ct_arm;
+volatile uint32_t ct_blk[5], ct_ms[5];
+volatile int32_t  ct_info[3];
 volatile uint32_t capture_seq_errors;
 volatile uint32_t capture_short_packets;
 volatile uint32_t capture_dma_errors;
@@ -440,6 +450,34 @@ int main(void)
                            tl.preempt ? (tl.approach == TL_N ? "N" : tl.approach == TL_S ? "S" :
                                          tl.approach == TL_E ? "E" : "W") : "");
             tl_write();
+            if (ct_arm == 1) {
+                for (i = 0; i < 5; i++)
+                    ct_blk[i] = ct_ms[i] = 0;
+                ct_arm = 2;
+            }
+            if (ct_arm == 2) {
+                int ev[5];
+                ev[0] = ret == 0 && res.energy_db - res.noise_db > CT_SOUND_DB;
+                ev[1] = target.active;
+                ev[2] = req >= 0;
+                ev[3] = tl.preempt;
+                ev[4] = tl.preempt && tl.state == TL_ST_GREEN &&
+                        tl.phase == ((tl.approach == TL_N || tl.approach == TL_S) ? TL_PH_NS : TL_PH_EW);
+                for (i = 0; i < 5; i++) {
+                    if (ev[i] && !ct_blk[i] && (i == 0 || ct_blk[0])) {
+                        ct_blk[i] = blk_no;
+                        ct_ms[i] = now;
+                        if (i == 0)
+                            ct_info[2] = tl.phase << 8 | tl.state;
+                        if (i == 2) {
+                            ct_info[0] = fx(target.azimuth_deg, 10.0f);
+                            ct_info[1] = req;
+                        }
+                    }
+                }
+                if (ct_blk[4])
+                    ct_arm = 3;             /* 测完：保持结果供读出 */
+            }
             tl_text(txt, now);
             if (strcmp(txt, hdmi_mode_text) != 0) {
                 strcpy(hdmi_mode_text, txt);

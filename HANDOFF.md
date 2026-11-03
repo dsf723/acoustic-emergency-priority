@@ -558,3 +558,11 @@ python -I F:\FPGA_project\sound_localization\tools\analyze_rec.py F:\FPGA_projec
 - 2026-11-01 用户要求中、远再近一点，远距离 1m。JTAG 读 `lvl_hist`：最后一次警笛音量约 2~11dB（中位数 7.9），比原参考值 -3.1dB 响很多，只改门限无效。`RANGE_REF_LEVEL_DB` 改 2.5（假定低段对应 1 米，实际距离未量过），`RANGE_NEAR_M` 0.4、`RANGE_FAR_M` 0.8（滞回后约 0.92m 变远）。依赖当前喇叭音量，换音量需重新定。
 
 - 2026-11-01 用户把喇叭放在 40cm 播放，反馈远/中一直跳。JTAG 轮询（`scratchpad` 脚本，stop/读 `lvl_hist`/con）：40cm 中位数 2.4dB，1 秒窗口中位数在 -0.5~4.7dB 摆动。上一条"2.5dB 对应 1 米"的假定错误。改：`RANGE_REF_LEVEL_DB` -5.6（40cm 实测按 1/r 折算）、`RANGE_LEVEL_WIN` 48→144（约 3 秒）、`RANGE_NEAR_M` 0.25、`RANGE_FAR_M` 0.65。1 米处未实测。
+
+- 2026-11-03 查实录方向偏差（`rec/dataset/ambulance/*T141016*`，标注 0° 1m，显示约 148°）。新工具 `tools/dir_eval.py`：换音起音（直达声）分析。
+  该警笛约每秒循环 1836Hz（0.5s）→ 2384Hz（0.35s）→ 1574Hz。换音后 0~3ms 窄带波束方向：1836Hz 133.4°±3.2°（13 次，一致度 0.96），
+  2384Hz 149.8°±5.5°（11 次，0.90）；1836Hz 稳态（100~300ms）漂到 100.8°，换音后约 15~20ms 有强反射（方向短暂约 270°）。
+  结论：直达声本身来自约 133~150°，偏差不是反射造成的；是喇叭实际位置还是阵列安装方向/通道映射（`DOA_MIC_DIR` 镜像无法由拍手 TDOA 区分）待四方向实测。
+  注意：照片上阵列丝印 0→5 俯视为顺时针，而 `DOA_MIC_DIR=+1`（逆时针），ch 与丝印的对应未核实；若四方向实测东西互换，就是这里。
+- 2026-11-03 新增全链路计时：`main.c` 的 `ct_arm/ct_blk/ct_ms/ct_info`，工具 `tools/chain_test.py`（--arm / --status / --read）。已编译，未上板。
+- 2026-11-03 修 `gen_test.py`：定位精度的"语音+回声"一项原来没把 echo 传给 render（实际无回声）；修后 RMS 2.42°、最大 5.92°，仍通过。
